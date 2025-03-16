@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="audio-wave.js"></script>
+    <style>
+        .control-panel {
+            margin: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin-right: 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            background: #fff;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #f0f0f0;
+        }
+        .threshold-control {
+            margin-top: 10px;
+        }
+        .color-picker {
+            margin: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="control-panel">
+        <button id="micButton">开启麦克风</button>
+        <button id="testButton">测试动画</button>
+        <div class="threshold-control">
+            <label for="threshold">声音灵敏度：</label>
+            <input type="range" id="threshold" min="0" max="50" value="15">
+            <span id="thresholdValue">15</span>
+        </div>
+        <div class="color-picker">
+            <label for="colorPicker">波形颜色：</label>
+            <input type="color" id="colorPicker" value="#74b9ff">
+        </div>
+    </div>
+    
+    <audio-wave color="#74b9ff"></audio-wave>
+
+    <script>
+        class AudioDetector {
+            constructor(onSound, onSilence) {
+                this.audioContext = null;
+                this.mediaStream = null;
+                this.analyser = null;
+                this.isListening = false;
+                this.threshold = 15;
+                this.onSound = onSound;
+                this.onSilence = onSilence;
+                this.lastSoundTime = 0;
+                this.soundTimeout = null;
+            }
+
+            async startListening() {
+                try {
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.analyser.fftSize = 256;
+                    
+                    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                    source.connect(this.analyser);
+                    
+                    this.isListening = true;
+                    this.detectSound();
+                    return true;
+                } catch (error) {
+                    console.error('无法访问麦克风:', error);
+                    alert('无法访问麦克风，请确保已授予权限。');
+                    return false;
+                }
+            }
+
+            stopListening() {
+                if (this.soundTimeout) {
+                    clearTimeout(this.soundTimeout);
+                    this.soundTimeout = null;
+                }
+                if (this.mediaStream) {
+                    this.mediaStream.getTracks().forEach(track => track.stop());
+                    this.mediaStream = null;
+                }
+                if (this.audioContext) {
+                    this.audioContext.close();
+                    this.audioContext = null;
+                }
+                this.isListening = false;
+            }
+
+            detectSound() {
+                if (!this.isListening) return;
+
+                const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+                this.analyser.getByteFrequencyData(dataArray);
+                
+                const average = dataArray.reduce((acc, val) => acc + val, 0) / dataArray.length;
+
+                if (average > this.threshold) {
+                    this.lastSoundTime = Date.now();
+                    if (!this.soundTimeout) {
+                        this.onSound();
+                    }
+                    clearTimeout(this.soundTimeout);
+                    const totalTime = 25 * 0.03 * 1000 + 1500 * 0.3;
+                    this.soundTimeout = setTimeout(() => {
+                        this.onSilence();
+                        this.soundTimeout = null;
+                    }, totalTime);
+                }
+
+                requestAnimationFrame(() => this.detectSound());
+            }
+
+            setThreshold(value) {
+                this.threshold = value;
+            }
+        }
+
+        // 初始化
+        const audioWave = document.querySelector('audio-wave');
+        const micButton = document.getElementById('micButton');
+        const testButton = document.getElementById('testButton');
+        const thresholdInput = document.getElementById('threshold');
+        const thresholdValue = document.getElementById('thresholdValue');
+
+        const detector = new AudioDetector(
+            () => audioWave.play(),  // 声音回调
+            () => audioWave.stop()   // 静音回调
+        );
+
+        // 麦克风控制
+        micButton.addEventListener('click', async () => {
+            if (!detector.isListening) {
+                const success = await detector.startListening();
+                if (success) {
+                    micButton.textContent = '关闭麦克风';
+                    testButton.disabled = true;
+                }
+            } else {
+                detector.stopListening();
+                micButton.textContent = '开启麦克风';
+                testButton.disabled = false;
+                audioWave.stop();
+            }
+        });
+
+        // 测试按钮
+        testButton.addEventListener('click', () => {
+            if (!detector.isListening) {
+                audioWave.play();
+                const totalTime = 25 * 0.03 * 1000 + 1500 * 0.3;
+                setTimeout(() => {
+                    audioWave.stop();
+                }, totalTime);
+            }
+        });
+
+        // 灵敏度控制
+        thresholdInput.addEventListener('input', (e) => {
+            const value = e.target.value;
+            detector.setThreshold(value);
+            thresholdValue.textContent = value;
+        });
+
+        // 添加颜色控制
+        const colorPicker = document.getElementById('colorPicker');
+
+        colorPicker.addEventListener('input', (e) => {
+            audioWave.setColor(e.target.value);
+        });
+    </script>
+</body>
+</html> 
